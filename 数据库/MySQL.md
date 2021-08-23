@@ -1,3 +1,20 @@
+[详细](https://mp.weixin.qq.com/s/J3kCOJwyv2nzvI0_X0tlnA)
+
+
+创建索引语句
+CREATE INDEX indexName ON table_name (column_name)
+
+left join语句
+
+ MySQL LEFT JOIN 会读取左边数据表的全部数据，即便右边表无对应数据。
+```
+select a.x from a left join b on a.x=b.x;
+```
+
+
+## MVCC
+MVCC是多版本并发控制，通过回滚指针把一个数据行的所有快照连接起来，存储在undo log里，在一个事务读取数据行的时候，只能读取版本号小于等于当前事务版本号的数据行。
+
 ### 数据库优化
 [详细](https://mp.weixin.qq.com/s/e0CqJG2-PCDgKLjQfh02tw)
 #### 在本地环境跑一遍SQL，但是要排除缓存干扰，执行SQL的时候，记得加上SQL NoCache去跑SQL
