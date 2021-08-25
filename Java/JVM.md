@@ -17,3 +17,5 @@
 3、若父加载器为空则默认使用启动类加载器作为父加载器。
 
 4、如果父类加载失败，抛出ClassNotFoundException异常后，再调用自己的findClass()方法进行加载。
+## GC
+[详细](https://mp.weixin.qq.com/s/_AKQs-xXDHlk84HbwKUzOw)
