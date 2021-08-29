@@ -4,6 +4,7 @@
   * [基础](Java/基础.md)
   * [JVM](Java/JVM.md)
   * [并发](Java/并发.md)
+  * [集合](Java/集合.md)
 * 数据库
   * [MySQL](数据库/MySQL.md)
   * [Redis](数据库/Redis.md)
