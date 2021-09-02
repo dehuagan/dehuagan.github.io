@@ -245,7 +245,9 @@ public class SpringmvcApplication {
 把启动类分解一下，实际上就是两部分:
 - @SpringBootApplication注解
 - 一个main()方法，里面调用SpringApplication.run()方法。
+  
 ## @SpringBootApplication
+
 ```php
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
