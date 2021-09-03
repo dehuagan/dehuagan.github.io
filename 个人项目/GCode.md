@@ -21,7 +21,7 @@
 
 同时将submission_id作为消息发送到mq（通过事务来保证消息发送不丢失，事务成功提交，则消息被自动签收，如果事务回滚，则消息会被再次传送）。
 
-判题机服务作为消费者，收到消息后，首先通过redis判断是否消费过这个submission_id（防止重复消费），接着根据submission_id从数据库取到submission对象，将其中的code存到一个脚本文件（比如java的话就存储为java文件），然后通过java的runtime执行相对应脚本文件，调用从网上找的一个脚本获取运行时间和内存。
+判题机服务作为消费者，收到消息后，首先通过redis判断是否消费过这个submission_id（防止重复消费），接着根据submission_id从数据库取到submission对象，将其中的code存到一个脚本文件（比如java的话就存储为java文件），然后通过java的runtime（可以执行系统命令）执行相对应脚本文件，调用从网上找的一个脚本获取运行时间和内存。
 
 判题过程就是一个for循环，遍历testcase，通过对testcase的答案和脚本运行结果比较，得到通过率，然后更新到mysql。
 
