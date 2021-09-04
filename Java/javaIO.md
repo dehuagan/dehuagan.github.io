@@ -15,7 +15,7 @@ Socket实质上提供了进程通信的端点。进程通信之前，双方首�
 ![img](../img/socket.png)
 
 # TCP实现
-```
+```js
 public static void main(String[] args) {
     try {
         ServerSocket serverSocket = new ServerSocket();
@@ -79,7 +79,7 @@ class TcpClient {
 ```
 
 # UDP实现
-```
+```js
 class UDPServer {
     public void udpConnect() throws IOException {
         DatagramSocket socket = new DatagramSocket(65001);
@@ -118,11 +118,282 @@ class UDPClient {
 }
 ```
 
+# NIO
+
+## 普通多线程服务器
+多个客户端同时向服务端发送请求，服务端做出的措施是开启多个线程来匹配相对应的客户端，并且每个线程去独自完成他们的客户端请求。
+
+例子
+```js
+// 服务端
+public class MyServer{
+      private static ExecutorService executorService = Executors.newCachedThreadPool();  //创建一个线程池
+        private static class HandleMsg implements Runnable{      //一旦有新的客户端请求，创建这个线程进行处理
+        Socket client;          //创建一个客户端
+        public HandleMsg(Socket client){        //构造传参绑定
+            this.client = client;
+        }
+         @Override
+        public void run() {
+            BufferedReader bufferedReader = null;       //创建字符缓存输入流
+            PrintWriter printWriter = null;         //创建字符写入流
+            try {
+                bufferedReader = new BufferedReader(new InputStreamReader(client.getInputStream())); //获取客户端的输入流
+                printWriter = new PrintWriter(client.getOutputStream(),true);   //获取客户端的输出流，true是随时刷新
+                String inputLine = null;
+                long a = System.currentTimeMillis();
+                while ((inputLine = bufferedReader.readLine())!=null){
+                    printWriter.println(inputLine);
+                }
+                long b = System.currentTimeMillis();
+                System.out.println("此线程花费了："+(b-a)+"秒！");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }finally {
+                try {
+                    bufferedReader.close();
+                    printWriter.close();
+                    client.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }   
+     public static void main(String[] args) throws IOException {  //服务端的主线程是用来循环监听客户端请求
+        ServerSocket server = new ServerSocket(8686);   //创建一个服务端且端口为8686
+        Socket client = null;
+        while (true){           //循环监听
+            client = server.accept();       //服务端监听到一个客户端请求
+            System.out.println(client.getRemoteSocketAddress()+"地址的客户端连接成功!");
+            executorService.submit(new HandleMsg(client));   //将该客户端请求通过线程池放入HandlMsg线程中进行处理
+        }
+    }
+}
 
 
+// 客户端
+public class MyClient {
+    public static void main(String[] args) throws IOException {
+        Socket client = null;
+        PrintWriter printWriter = null;
+        BufferedReader bufferedReader = null;
+        try {
+            client = new Socket();
+            client.connect(new InetSocketAddress("localhost",8686));
+            printWriter = new PrintWriter(client.getOutputStream(),true);
+            printWriter.println("hello");
+            printWriter.flush();
+
+            bufferedReader = new BufferedReader(new InputStreamReader(client.getInputStream()));            //读取服务器返回的信息并进行输出
+            System.out.println("来自服务器的信息是："+bufferedReader.readLine());
+        } catch (IOException e) {
+            e.printStackTrace();
+        }finally {
+            printWriter.close();
+            bufferedReader.close();
+            client.close();
+        }
+    }
+}
+```
+
+但是试想一下：如果一个客户端请求中，在IO写入到服务端过程中加入Sleep，使每个请求占用服务端线程10秒然后有大量的客户端请求，每个请求都占用那么长时间那么服务端的并发能力就会大幅度下降这并不是因为服务端有多少繁重的任务，而仅仅是因为服务线程在等待IO（因为accept，read，write都是阻塞式的）让高速运行的CPU去等待及其低效的网络IO是非常不合算的行为。
+
+## New IO
+New IO成功的解决了上述问题，它是怎样解决的呢？
+
+IO处理客户端请求的最小单位是线程
+
+而NIO使用了比线程还小一级的单位：通道（Channel）
+
+可以说，NIO中只需要一个线程就能完成所有接收，读，写等操作
 
 
+NIO三大核心：
+- Selector 选择器
+- Buffer 缓冲区
+- Channel 通道
 
+NIO 常常被叫做非阻塞 IO，主要是因为 NIO 在网络通信中的非阻塞特性被广泛使用。
 
+NIO 实现了 IO 多路复用中的 Reactor 模型，一个线程 Thread 使用一个选择器 Selector 通过轮询的方式去监听多个通道 Channel 上的事件，从而让一个线程就可以处理多个事件。
 
+## NIO TCP服务端
+```js
+public class MyNioServer {
+    private Selector selector;          //创建一个选择器
+    private final static int port = 8686;
+    private final static int BUF_SIZE = 10240;
 
+    private void initServer() throws IOException {
+        //创建通道管理器对象selector
+        this.selector=Selector.open();
+
+        //创建一个通道对象channel
+        ServerSocketChannel channel = ServerSocketChannel.open();
+        channel.configureBlocking(false);       //将通道设置为非阻塞
+        channel.socket().bind(new InetSocketAddress(port));       //将通道绑定在8686端口
+        //将上述的通道管理器和通道绑定，并为该通道注册OP_ACCEPT事件
+        //注册事件后，当该事件到达时，selector.select()会返回（一个key），如果该事件没到达selector.select()会一直阻塞
+        SelectionKey selectionKey = channel.register(selector,SelectionKey.OP_ACCEPT);
+
+        while (true){       //轮询
+            selector.select();          //这是一个阻塞方法，一直等待直到有数据可读，返回值是key的数量（可以有多个）
+            Set keys = selector.selectedKeys();         //如果channel有数据了，将生成的key放入keys集合中
+            Iterator iterator = keys.iterator();        //得到这个keys集合的迭代器
+            while (iterator.hasNext()){             //使用迭代器遍历集合
+                SelectionKey key = (SelectionKey) iterator.next();       //得到集合中的一个key实例
+                iterator.remove();          //拿到当前key实例之后记得在迭代器中将这个元素删除，非常重要，否则会出错
+                if (key.isAcceptable()){         //判断当前key所代表的channel是否在Acceptable状态，如果是就进行接收
+                    doAccept(key);
+                }else if (key.isReadable()){
+                    doRead(key);
+                }else if (key.isWritable() && key.isValid()){
+                    doWrite(key);
+                }else if (key.isConnectable()){
+                    System.out.println("连接成功！");
+                }
+            }
+        }
+    }
+
+    public void doAccept(SelectionKey key) throws IOException {
+        ServerSocketChannel serverChannel = (ServerSocketChannel) key.channel();
+        System.out.println("ServerSocketChannel正在循环监听");
+        SocketChannel clientChannel = serverChannel.accept();
+        clientChannel.configureBlocking(false);
+        clientChannel.register(key.selector(),SelectionKey.OP_READ);
+    }
+
+    public void doRead(SelectionKey key) throws IOException {
+        SocketChannel clientChannel = (SocketChannel) key.channel();
+        ByteBuffer byteBuffer = ByteBuffer.allocate(BUF_SIZE);
+        long bytesRead = clientChannel.read(byteBuffer);
+        while (bytesRead>0){
+            /* 切换读写 */
+            byteBuffer.flip();
+            byte[] data = byteBuffer.array();
+            String info = new String(data).trim();
+            System.out.println("从客户端发送过来的消息是："+info);
+            byteBuffer.clear();
+            bytesRead = clientChannel.read(byteBuffer);
+        }
+        if (bytesRead==-1){
+            clientChannel.close();
+        }
+    }
+
+    public void doWrite(SelectionKey key) throws IOException {
+        ByteBuffer byteBuffer = ByteBuffer.allocate(BUF_SIZE);
+        byteBuffer.flip();
+        SocketChannel clientChannel = (SocketChannel) key.channel();
+        while (byteBuffer.hasRemaining()){
+            clientChannel.write(byteBuffer);
+        }
+        byteBuffer.compact();
+    }
+
+    public static void main(String[] args) throws IOException {
+        MyNioServer myNioServer = new MyNioServer();
+        myNioServer.initServer();
+    }
+}
+```
+### SelectionKey
+SelectionKey是通道和选择器交互的核心组件比如在SocketChannel上绑定一个Selector，并注册为连接事件：
+```js
+SocketChannel clientChannel = SocketChannel.open();
+clientChannel.configureBlocking(false);
+clientChannel.connect(new InetSocketAddress(port));
+clientChannel.register(selector, SelectionKey.OP_CONNECT);
+```
+
+核心在register()方法，它返回一个SelectionKey对象来检测channel事件是那种事件, 可以使用以下方法：
+
+```js
+selectionKey.isAcceptable();
+selectionKey.isConnectable();
+selectionKey.isReadable();
+selectionKey.isWritable();
+```
+
+服务端便是通过这些方法 在轮询中执行相对应操作
+
+当然通过Channel与Selector绑定的key也可以反过来拿到他们
+
+```js
+Channel  channel  = selectionKey.channel();
+Selector selector = selectionKey.selector();
+```
+
+在Channel上注册事件时，我们也可以顺带绑定一个Buffer：
+```js
+clientChannel.register(key.selector(), SelectionKey.OP_READ,ByteBuffer.allocateDirect(1024));
+```
+或者绑定一个Object：
+```js
+selectionKey.attach(Object);
+Object anthorObj = selectionKey.attachment();
+```
+
+## TCP客户端
+```js
+public class MyNioClient {
+    private Selector selector;          //创建一个选择器
+    private final static int port = 8686;
+    private final static int BUF_SIZE = 10240;
+    private static ByteBuffer byteBuffer = ByteBuffer.allocate(BUF_SIZE);
+
+    private void  initClient() throws IOException {
+        this.selector = Selector.open();
+        SocketChannel clientChannel = SocketChannel.open();
+        clientChannel.configureBlocking(false);
+        clientChannel.connect(new InetSocketAddress(port));
+        clientChannel.register(selector, SelectionKey.OP_CONNECT);
+        while (true){
+            selector.select();
+            Iterator<SelectionKey> iterator = selector.selectedKeys().iterator();
+            while (iterator.hasNext()){
+                SelectionKey key = iterator.next();
+                iterator.remove();
+                if (key.isConnectable()){
+                    doConnect(key);
+                }else if (key.isReadable()){
+                    doRead(key);
+                }
+            }
+        }
+    }
+
+    public void doConnect(SelectionKey key) throws IOException {
+        SocketChannel clientChannel = (SocketChannel) key.channel();
+        if (clientChannel.isConnectionPending()){
+            clientChannel.finishConnect();
+        }
+        clientChannel.configureBlocking(false);
+        String info = "服务端你好!!";
+        byteBuffer.clear();
+        byteBuffer.put(info.getBytes("UTF-8"));
+        byteBuffer.flip();
+        clientChannel.write(byteBuffer);
+        //clientChannel.register(key.selector(),SelectionKey.OP_READ);
+        clientChannel.close();
+    }
+
+    public void doRead(SelectionKey key) throws IOException {
+        SocketChannel clientChannel = (SocketChannel) key.channel();
+        clientChannel.read(byteBuffer);
+        byte[] data = byteBuffer.array();
+        String msg = new String(data).trim();
+        System.out.println("服务端发送消息："+msg);
+        clientChannel.close();
+        key.selector().close();
+    }
+
+    public static void main(String[] args) throws IOException {
+        MyNioClient myNioClient = new MyNioClient();
+        myNioClient.initClient();
+    }
+}
+```
