@@ -18,6 +18,63 @@
 
 4、如果父类加载失败，抛出ClassNotFoundException异常后，再调用自己的findClass()方法进行加载。
 
+## 破坏双亲委派
+### why
+因为在某些情况下父类加载器需要委托子类加载器去加载class文件。受到加载范围的限制，父类加载器无法加载到需要的文件，以Driver接口为例，由于Driver接口定义在jdk当中的，而其实现由各个数据库的服务商来提供，比如mysql的就写了MySQL Connector，那么问题就来了，DriverManager（也由jdk提供）要加载各个实现了Driver接口的实现类，然后进行管理，但是DriverManager由启动类加载器加载，只能记载JAVA_HOME的lib下文件，而其实现是由服务商提供的，由系统类加载器加载，这个时候就需要启动类加载器来委托子类来加载Driver实现，从而破坏了双亲委派，这里仅仅是举了破坏双亲委派的其中一个情况。
+
+### 破坏双亲委派的实现
+我们结合Driver来看一下在spi（Service Provider Inteface）中如何实现破坏双亲委派。
+
+先从DriverManager开始看，平时我们通过DriverManager来获取数据库的Connection：
+
+```js
+String url = "jdbc:mysql://localhost:3306/xxx";
+Connection conn = java.sql.DrivaerManager.getConnection(url,"root","root");
+```
+
+在调用DriverManager的时候，会先初始化类，调用其中的静态块：
+```js
+static {
+    loadInitialDrivers();
+    println("JDBC DriverManager initialized");
+}
+
+private static void loadInitialDrivers () {
+    ...
+    // 加载Driver的实现类
+    AccessController.doPrivileged(new PrivilegedAction<void>() {
+        public void run() {
+            ServiceLoader<Driver> loadedDrivers = ServiceLoader.load(Driver.class);
+            Iterator<Driver> driversIterator = loadedDrivers.iterator();
+            try{
+                while(driversIterator.hasNext()){
+                    driversIterator.next();
+                }
+            } catch(Throwable t){
+
+            }
+            return null;
+        }
+    });
+    ...
+}
+```
+
+重点来看一下ServiceLoader.load(Driver.class)：
+
+```js
+public static <S> ServiceLoader<S> load(Class<S> service) {
+    //获取当前线程中的上下文类加载器
+    ClassLoader cl = Thread.currentThread().getContextClassLoader();
+    return ServiceLoader.load(service, cl);
+}
+```
+
+可以看到，load方法调用获取了当前线程中的上下文类加载器，那么上下文类加载器放的是什么加载器呢？
+
+在sun.misc.Launcher中，我们找到了答案，在Launcher初始化的时候，会获取AppClassLoader，然后将其设置为上下文类加载器，而这个AppClassLoader，就是之前上文提到的系统类加载器Application ClassLoader，所以上下文类加载器默认情况下就是系统加载器。
+
+![img](../img/loadclass.png)
 
 # GC
 [详细](https://mp.weixin.qq.com/s/_AKQs-xXDHlk84HbwKUzOw)
