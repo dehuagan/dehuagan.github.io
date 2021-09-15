@@ -120,7 +120,7 @@ select a.x from a left join b on a.x=b.x;
 
 1. 第一颗星：WHERE 后面参与查询的列可以组成了单列索引或联合索引
 
-2. 第二颗星：避免排序，即如果 SQL 语句中出现 order by colulmn，那么取出的结果集就已经是按照 column 排序好的，不需要再生成临时表
+2. 第二颗星：避免排序，即如果 SQL 语句中出现 order by column，那么取出的结果集就已经是按照 column 排序好的，不需要再生成临时表
 
 3. 第三颗星：SELECT 对应的列应该尽量是索引列，即尽量避免回表查询。
 
