@@ -20,6 +20,8 @@
 
 在项目中，底层的实现都是由很多个对象组成的，对象之间彼此合作实现项目的业务逻辑。但是，很多很多对象紧密结合在一起，一旦有一方出问题了，必然会对其他对象有所影响，所以才有了解藕的这种设计思想
 
+在平时的JavaWeb应用程序开发中，我们要完成某一个模块功能时，可能会需要两个或以上的对象来一起协作完成，在以前没有使用Spring框架的时候，每个对象在需要别的对象协助时，都需要自己通过new的方式将协作的对象实例化出来，创建协作对象的权限在自己手上，自己需要哪个，就主动去创建就可以了，而这样做呢，会使得对象之间的耦合变高，A对象需要B对象时，A对象来实例化B对象，这样A对象就对B对象产生了依赖，也就是A对象和B对象之间存在一种紧密耦合关系，而使用了Spring框架之后就不一样了，创建B对象的工作交由Spring框架来帮我们完成，Spring创建好这个对象以后，会存储到一个容器里面，当A对象需要时，Spring就会从容器中注入进来，至于Spring是如何创建这个对象的，A对象其实并不需要关心，A对象需要B对象时，Spring来创建B对象，然后给A对象就可以，从而达到松耦合的目的。
+
 # AOP
 定义注解
 ```js
@@ -451,3 +453,75 @@ public ConfigurableApplicationContext run(String... args) {
 结合注释和源码，其实很清晰了，为了加深印象，画张图看一下整个流程。
 
 ![img](../img/sp6.png)
+
+
+# Mybatis
+
+MyBatis 是支持定制化 SQL、存储过程以及高级映射的优秀的持久层框架。
+
+MyBatis 避免了几乎所有的 JDBC 代码和手动设置参数以及对结果集的检索封装。
+
+MyBatis 可以对配置和原生 Map 使用简单的 XML 或注解，将接口和Java的POJOs（Plain Old Java Objects（普通的 Java 对象））映射成数据库中的记录。
+
+MyBatis 主要思想是将程序中的大量SQL语句抽取出来，配置在配置文件中，以实现SQL的灵活配置。
+
+MyBatis 并不完全是一种ORM框架，它的设计思想和ORM相似，只是它允许直接编写SQL语句，使得数据库访问更加灵活。
+
+MyBatis 提供了一种“半自动化”的ORM实现，是一种“SQL Mapping”框架。
+
+## ORM 基本映射关系：
+数据表映射类。
+数据表的行映射对象（实例）。
+数据表的列（字段）映射对象的属性。
+
+![img](../img/mybatis.png)
+
+## MyBatis功能结构
+1. API接口层：
+提供给外部使用的接口API，开发人员通过这些本地API来操纵数据库。接口层接收到调用请求就会调用数据处理层来完成具体的数据处理。
+2. 数据处理层：
+   负责具体的SQL查找、SQL解析、SQL执行和执行结果映射处理等。它主要的目的是根据调用的请求完成一次数据库操作。
+3. 基础支撑层：负责最基础的功能支撑，包括连接管理、事务管理、配置加载和缓存处理，这些都是共用的东西，将他们抽取出来作为最基础的组件，为上层的数据处理层提供最基础的支撑。
+
+![img](../img/mybatis1.png)
+
+## MyBatis 框架结构
+1. 加载配置：
+MyBatis 应用程序根据XML配置文件加载运行环境，创建SqlSessionFactory, SqlSession，将SQL的配置信息加载成为一个个MappedStatement对象（包括了传入参数映射配置、执行的SQL语句、结果映射配置），存储在内存中。（配置来源于两个地方，一处是配置文件，一处是 Java 代码的注解）
+2. SQL解析：
+当API接口层接收到调用请求时，会接收到传入SQL的ID和传入对象（可以是Map、JavaBean或者基本数据类型），MyBatis 会根据SQL的ID找到对应的MappedStatement，然后根据传入参数对象对MappedStatment进行解析，解析后可以得到最终要执行的SQL语句和参数。
+3. SQL的执行：
+SqlSession将最终得到的SQL和参数拿到数据库进行执行，得到操作数据库的结果。
+4. 结果映射：
+将操作数据库的结果按照映射的配置进行转换，可以转换成HashMap、JavaBean或者基本数据类型，并将最终结果返回，用完之后关闭SqlSession。
+
+SqlSessionFactory：
+>每个基于MyBatis的应用都是以一个SqlSessionFactory的实例为核心的。
+SqlSessionFactory是单个数据库映射关系经过编译后的内存映像。
+SqlSessionFactory的实例可以通过SqlSessionFactoryBuilder获得。
+而SqlSessionFactoryBuilder则可以从XML配置文件或一个预先定制的Configuration的实例构建出SqlSessionFactory的实例。
+SqlSessioFactory是创建SqlSession的工厂。
+
+SqlSession:
+>SqlSession是执行持久化操作的对象，它完全包含了面向数据库执行SQL命令所需的所有方法。
+可以通过SqlSession实例来直接执行已映射的SQL语句，在使用完SqlSession后我们应该使用finally块来确保关闭它。
+
+## MyBatis、JDBC、Hibernate的区别：
+- MyBatis也是基于JDBC的，Java与数据库操作仅能通过JDBC完成。MyBatis也要通过JDBC完成数据查询、更新这些动作。
+- MyBatis仅仅是在JDBC基础上做了 OO化、封装事务管理接口这些东西。
+- MyBatis和Hibernate都屏蔽JDBC API的底层访问细节，使我们不用跟JDBC API打交道就可以访问数据库。
+- 但是，Hibernate是全自动的ORM映射工具，可以自动生成SQL语句。
+- MyBatis需要在xml配置文件中写SQL语句。
+- 因为Hibernate是自动生成SQL语句的，在写复杂查询时，Hibernate实现比MyBatis复杂的多。
+
+## 通常一个 Xml 映射文件，都会写一个 Dao 接口与之对应，请 问，这个 Dao 接口的工作原理是什么?Dao 接口里的方法，参数不同时，方法能重载吗?
+
+Dao 接口，就是人们常说的 Mapper 接口，接口的全限名，就是映射文件中的 namespace 的值， 接口的方法名，就是映射文件中MappedStatement的 id 值，接口方法内的参数，就是传递给 sql 的参数。Mapper接口是没有实现类的，当调用接口方法时，接口全限名+方法名拼接字符串作为 key 值，可唯一定位一个 MappedStatement。
+
+举例:com.mybatis3.mappers.StudentDao.findStudentById，可以唯一找到 namespace 为com.mybatis3.mappers.StudentDao下面id = findStudentById的MappedStatement。 在 Mybatis 中，每一个 ```<select>```、```<insert>```、```<update>```、```<delete>```标签，都会被解析为一个 MappedStatement 对象。
+
+Dao 接口里的方法，是不能重载的，因为是全限名+方法名的保存和寻找策略。
+Dao 接口的工作原理是 JDK 动态代理，Mybatis 运行时会使用 JDK 动态代理为 Dao 接口生成代理 proxy 对象，代理对象 proxy 会拦截接口方法，转而执行MappedStatement所代表的 sql，然后将 sql 执行结果返回。
+
+## 为什么说 Mybatis 是半自动 ORM 映射工具?它与全自动的区别在哪里?
+Hibernate 属于全自动 ORM 映射工具，使用 Hibernate 查询关联对象或者关联集合对象时，可以 根据对象关系模型直接获取，所以它是全自动的。而 Mybatis 在查询关联对象或关联集合对象时，需 要手动编写 sql 来完成，所以，称之为半自动 ORM 映射工具。
