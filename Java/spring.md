@@ -13,6 +13,15 @@
 ## 何为反转，反转了什么
 把这个权利交给了 Spring 容器，而不是自己去控制，就是反转。由之前的自己主动创建对象，变成现在被动接收别人给我们的对象的过程，这就是反转。
 
+## 具体
+IoC（Inverse of Control:控制反转）是一种设计思想，就是 将原本在程序中手动创建对象的控制权，交由Spring框架来管理。 IoC 在其他语言中也有应用，并非 Spirng 特有。 IoC 容器是 Spring 用来实现 IoC 的载体， IoC 容器实际上就是个Map（key，value）,Map 中存放的是各种对象。
+
+将对象之间的相互依赖关系交给 IoC 容器来管理，并由 IoC 容器完成对象的注入。这样可以很大程度上简化应用的开发，把应用从复杂的依赖关系中解放出来。 IoC 容器就像是一个工厂一样，当我们需要创建一个对象的时候，只需要配置好配置文件/注解即可，完全不用考虑对象是如何被创建出来的。 在实际项目中一个 Service 类可能有几百甚至上千个类作为它的底层，假如我们需要实例化这个 Service，你可能要每次都要搞清这个 Service 所有底层类的构造函数，这可能会把人逼疯。如果利用 IoC 的话，你只需要配置好，然后在需要的地方引用就行了，这大大增加了项目的可维护性且降低了开发难度。
+
+Spring 时代我们一般通过 XML 文件来配置 Bean，后来开发人员觉得 XML 文件来配置不太好，于是 SpringBoot 注解配置就慢慢开始流行起来。
+
+![img](../img/ioc.png)
+
 ## 好处
 解耦
 
@@ -250,7 +259,7 @@ public class SpringmvcApplication {
   
 ## @SpringBootApplication
 
-```php
+```java
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
@@ -269,7 +278,7 @@ public @interface SpringBootApplication {
 - @SpringBootConfiguration
 
 ###  @ComponentScan
-```php
+```java
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
 @Documented
@@ -282,7 +291,7 @@ public @interface ComponentScan {
 所以有一个basePackages的属性，如果默认不写，则从声明@ComponentScan所在类的package进行扫描。
 所以启动类最好定义在Root package下，因为一般我们在使用@SpringBootApplication时，都不指定basePackages的。
 ### @EnableAutoConfiguration
-```php
+```java
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
@@ -295,7 +304,7 @@ public @interface EnableAutoConfiguration {
 ```
 这是一个复合注解，看起来很多注解，实际上关键在@Import注解，它会加载AutoConfigurationImportSelector类，然后就会触发这个类的selectImports()方法。根据返回的String数组(配置类的Class的名称)加载配置类。
 
-```php
+```java
 public class AutoConfigurationImportSelector implements DeferredImportSelector, BeanClassLoaderAware,
 ResourceLoaderAware, BeanFactoryAware, EnvironmentAware, Ordered {
     //返回的String[]数组，是配置类Class的类名
@@ -325,7 +334,7 @@ ResourceLoaderAware, BeanFactoryAware, EnvironmentAware, Ordered {
 
 ## SpringApplication类
 接下来讲main方法里执行的这句代码，这是SpringApplication类的静态方法run()。
-```php
+```java
 //启动类的main方法
 public static void main(String[] args) {
     SpringApplication.run(SpringmvcApplication.class, args);
@@ -345,7 +354,7 @@ public static ConfigurableApplicationContext run(Class<?>[] primarySources, Stri
 ```
 通过上面的源码，发现实际上最后调的并不是静态方法，而是实例方法，需要new一个SpringApplication实例，这个构造器还带有一个primarySources的参数。所以我们直接定位到构造器。
 
-```php
+```java
 public SpringApplication(ResourceLoader resourceLoader, Class<?>... primarySources) {
     this.resourceLoader = resourceLoader;
     //断言primarySources不能为null，如果为null，抛出异常提示
@@ -386,7 +395,7 @@ private Class<?> deduceMainApplicationClass() {
 
 得到SpringApplication实例后，接下来就调用实例方法run()。继续看。
 
-```php
+```java
 public ConfigurableApplicationContext run(String... args) {
     //创建计时器
     StopWatch stopWatch = new StopWatch();
@@ -454,6 +463,27 @@ public ConfigurableApplicationContext run(String... args) {
 
 ![img](../img/sp6.png)
 
+# SpringMVC理解
+
+MVC 是一种设计模式,Spring MVC 是一款很优秀的 MVC 框架。Spring MVC 可以帮助我们进行更简洁的Web层的开发，并且它天生与 Spring 框架集成。Spring MVC 下我们一般把后端项目分为 Service层（处理业务）、Dao层（数据库操作）、Entity层（实体类）、Controller层(控制层，返回数据给前台页面)。
+
+![img](../img/springmvc.png)
+
+
+# Spring 框架中用到了哪些设计模式
+- 工厂设计模式 : Spring使用工厂模式通过 BeanFactory、ApplicationContext 创建 bean 对象。
+
+- 代理设计模式 : Spring AOP 功能的实现。
+
+- 单例设计模式 : Spring 中的 Bean 默认都是单例的。
+
+- 模板方法模式 : Spring 中 jdbcTemplate、hibernateTemplate 等以 Template 结尾的对数据库操作的类，它们就使用到了模板模式。
+
+- 包装器设计模式 : 我们的项目需要连接多个数据库，而且不同的客户在每次访问中根据需要会去访问不同的数据库。这种模式让我们可以根据客户的需求能够动态切换不同的数据源。
+
+- 观察者模式: Spring 事件驱动模型就是观察者模式很经典的一个应用。
+
+- 适配器模式 :Spring AOP 的增强或通知(Advice)使用到了适配器模式、spring MVC 中也是用到了适配器模式适配Controller。
 
 # Mybatis
 
@@ -468,6 +498,57 @@ MyBatis 主要思想是将程序中的大量SQL语句抽取出来，配置在配
 MyBatis 并不完全是一种ORM框架，它的设计思想和ORM相似，只是它允许直接编写SQL语句，使得数据库访问更加灵活。
 
 MyBatis 提供了一种“半自动化”的ORM实现，是一种“SQL Mapping”框架。
+
+# @Component 和 @Bean 的区别是什么
+
+1. 作用对象不同: @Component 注解作用于类，而@Bean注解作用于方法。
+
+2. @Component通常是通过类路径扫描来自动侦测以及自动装配到Spring容器中（我们可以使用 @ComponentScan 注解定义要扫描的路径从中找出标识了需要装配的类自动装配到 Spring 的 bean 容器中）。@Bean 注解通常是我们在标有该注解的方法中定义产生这个 bean,@Bean告诉了Spring这是某个类的示例，当我需要用它的时候还给我。
+
+3. @Bean 注解比 Component 注解的自定义性更强，而且很多地方我们只能通过 @Bean 注解来注册bean。比如当我们引用第三方库中的类需要装配到 Spring容器时，则只能通过 @Bean来实现。
+
+@Bean注解使用示例：
+
+```java
+@Configuration
+public class AppConfig {
+    @Bean
+    public TransferService transferService() {
+        return new TransferServiceImpl();
+    }
+
+}
+```
+
+下面这个例子是通过 @Component 无法实现的。
+
+```java
+@Bean
+public OneService getService(status) {
+    case (status)  {
+        when 1:
+                return new serviceImpl1();
+        when 2:
+                return new serviceImpl2();
+        when 3:
+                return new serviceImpl3();
+    }
+}
+```
+
+# 将一个类声明为Spring的 bean 的注解有哪些?
+
+我们一般使用 @Autowired 注解自动装配 bean，要想把类标识成可用于 @Autowired 注解自动装配的 bean 的类,采用以下注解可实现：
+
+- @Component ：通用的注解，可标注任意类为 Spring 组件。如果一个Bean不知道属于哪个层，可以使用@Component 注解标注。
+
+- @Repository : 对应持久层即 Dao 层，主要用于数据库相关操作。
+
+- @Service : 对应服务层，主要涉及一些复杂的逻辑，需要用到 Dao层。
+
+- @Controller : 对应 Spring MVC 控制层，主要用户接受用户请求并调用 Service 层返回数据给前端页面。
+
+
 
 ## ORM 基本映射关系：
 数据表映射类。
