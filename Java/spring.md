@@ -485,20 +485,6 @@ MVC 是一种设计模式,Spring MVC 是一款很优秀的 MVC 框架。Spring M
 
 - 适配器模式 :Spring AOP 的增强或通知(Advice)使用到了适配器模式、spring MVC 中也是用到了适配器模式适配Controller。
 
-# Mybatis
-
-MyBatis 是支持定制化 SQL、存储过程以及高级映射的优秀的持久层框架。
-
-MyBatis 避免了几乎所有的 JDBC 代码和手动设置参数以及对结果集的检索封装。
-
-MyBatis 可以对配置和原生 Map 使用简单的 XML 或注解，将接口和Java的POJOs（Plain Old Java Objects（普通的 Java 对象））映射成数据库中的记录。
-
-MyBatis 主要思想是将程序中的大量SQL语句抽取出来，配置在配置文件中，以实现SQL的灵活配置。
-
-MyBatis 并不完全是一种ORM框架，它的设计思想和ORM相似，只是它允许直接编写SQL语句，使得数据库访问更加灵活。
-
-MyBatis 提供了一种“半自动化”的ORM实现，是一种“SQL Mapping”框架。
-
 # @Component 和 @Bean 的区别是什么
 
 1. 作用对象不同: @Component 注解作用于类，而@Bean注解作用于方法。
@@ -547,6 +533,22 @@ public OneService getService(status) {
 - @Service : 对应服务层，主要涉及一些复杂的逻辑，需要用到 Dao层。
 
 - @Controller : 对应 Spring MVC 控制层，主要用户接受用户请求并调用 Service 层返回数据给前端页面。
+
+
+
+# Mybatis
+
+MyBatis 是支持定制化 SQL、存储过程以及高级映射的优秀的持久层框架。
+
+MyBatis 避免了几乎所有的 JDBC 代码和手动设置参数以及对结果集的检索封装。
+
+MyBatis 可以对配置和原生 Map 使用简单的 XML 或注解，将接口和Java的POJOs（Plain Old Java Objects（普通的 Java 对象））映射成数据库中的记录。
+
+MyBatis 主要思想是将程序中的大量SQL语句抽取出来，配置在配置文件中，以实现SQL的灵活配置。
+
+MyBatis 并不完全是一种ORM框架，它的设计思想和ORM相似，只是它允许直接编写SQL语句，使得数据库访问更加灵活。
+
+MyBatis 提供了一种“半自动化”的ORM实现，是一种“SQL Mapping”框架。
 
 
 
