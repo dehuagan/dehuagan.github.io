@@ -54,7 +54,7 @@ akka主要创建多个actor，每个actor只监听一个事件（项目中，一
 解决办法
 
 - 梳理原生的oslo policy的代码流程
-- 服务启动时，预先将每个操作对应的规则都转换成AST语法树，使用ConcurrentHashMap将规则缓存起来
+- 服务启动时，预先将每个操作对应的规则都转换成AST语法树，使用[ConcurrentHashMap](../Java/集合.md#concurrenthashmap)将规则缓存起来
 
 ```java
 // rule:admin_or_owner or (is_admin:True and not expired:True)
