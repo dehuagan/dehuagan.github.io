@@ -1019,3 +1019,624 @@ crash-safe 能力的。但只有 redo log 也不行，因为 redo log 是 InnoDB
 语句，对应一条 DELETE 的 undo log ，对于每个 UPDATE 语句，对应一条相反的 UPDATE 的
 undo log ，这样在发生错误时，就能回滚到事务之前的数据状态。同时， undo log 也是 MVCC 
 (多版本并发控制)实现的关键
+
+
+# 事务
+
+## ACID
+
+- atomicity原子性：一个事务的操作要么全部成功，要么全部失败
+- consistency：一致性：数据库总是从一个一致性状态转换到另外一个一致性状态
+- isolation隔离性：一个事务的修改在最终提交前，对其他事务是不可见的
+- durability持久性：指的是一旦事务提交，所做的修改就会永久保存到数据库中
+
+ACID靠什么保证
+
+- 原子性：由undo log日志保证，它记录了需要回滚的日志信息，事务回滚时撤销已经执行成功的sql
+- 一致性：由代码层面保护
+- 隔离性：由MVCC保证
+- 持久性：由内存+redo log保证，mysql修改数据同时在内存和redo log记录这次操作，事务提交时由redo log刷盘，宕机的时候从redo log恢复。
+
+
+
+## 数据库并发一致性问题
+
+- 丢失修改：事务A对一个数据的修改被事务B覆盖了
+- 脏读：事务B读取一个被事务A修改过的数据后，事务A回滚，导致事务B读取的是脏数据
+- 不可重复读：事务B前后读取一个数据，因为事务A的修改导致前后读取的数据不一致
+- 幻读：由于事务B插入新数据，导致事务A前后读取的数据量不一致
+
+## 事务隔离级别
+
+- 读未提交：事务对数据的修改在提交前，对其他事务是可见的，无法避免脏读、不可重复读、幻读
+- 读已提交：事务对数据的修改在提交前，对其他事务是不可见的，可以避免脏读，无法避免不可重复读、幻读
+- 可重复读：可以避免脏读、不可重复读，无法避免幻读
+- 可串行化：强制事务串行执行，可避免脏读、不可重复读、幻读
+
+# SQL优化
+
+- 对查询进行优化，要尽量避免全表扫描，首先应考虑在where及order by涉及的列上建立索引
+
+- 尽量避免在where子句中对字段进行null值判断，否则将导致引擎放弃使用索引而进行全表扫描，如
+
+  ```sql
+  select id from t where num is null
+  ```
+
+  char(100)型，在字段建立时，空间就固定，不管是否插入值（NULL也包含在内），都是占用100个字符的空间，varchar这样的变长空间，null不占用空间
+
+- 尽量避免在where子句中使用!=或<>操作符，否则引擎将放弃使用索引而进行全表扫描
+
+- 尽量避免在where子句中使用or来连接条件，如果一个字段有索引，另一个字段没有索引，将导致引擎放弃使用索引而进行全表扫描，如：
+
+  ```sql
+  select id from t where num=10 or Name='admin'
+  ```
+
+  可以改成
+
+  ```sql
+  select id from t where num=10
+  union all
+  select id from t where Name='admin'
+  ```
+
+- 慎重使用in和not in，否则会导致全表扫描，对于连续的数值，能用between就不用in
+
+  ```sql
+  select id from t where num between 1 and 3
+  ```
+
+  很多时候用exists代替in会更好：
+
+  ```sql
+  select num from a where num in (select num from b)
+  ```
+
+  变成
+
+  ```sql
+  select num from a where exists(select 1 from b where num=a.num)
+  ```
+
+​	in的查询逻辑中，会将子查询的结果集计算并完整加载到内存的一个临时工作区中（列表或哈希表），然后	将主查询每一行需要比较的值与临时结果集进行匹配检查
+
+​	exists中，是将主查询中的每一行相关值带入到子查询中执行，子查询一旦找到满足条件，就返回，相当于	遍历主查询的表，每次做一次子查询
+
+- 模糊查询有可能导致全表扫描（索引无法定位起点）
+
+  ```sql
+  select id from t where name like '%abc%'
+  ```
+
+  若要提高效率，可以考虑全文检索
+
+  创建全文索引
+
+  ```sql
+  ALTER TABLE t ADD FULLTEXT INDEX ft_name (name); #对name列创建全文索引
+  ```
+
+  ```sql
+  select id from t where match(name) against('abc' in natural language mode)
+  ```
+
+- 在where子句中使用参数，会导致全表扫描，因为sql只有在运行时才会解析局部变量，但优化程序不能将访问计划的选择推迟到运行时，必须在编译时进行选择，然而，在编译时建立访问计划，变量的值还是未知的，因而无法作为索引选择的输入项，如下面语句会进行全表扫描
+
+  ```sql
+  select id from t where num = @num
+  ```
+
+  可以改为强制查询使用索引
+
+  ```sql
+  select id from t with(index(索引名)) where num = @num
+  ```
+
+- 避免在where子句中对字段进行表达式操作，这将导致引擎放弃使用索引而进行全表扫描
+
+  ```sql
+  select id from t where num/2 = 100
+  ```
+
+  应改为：
+
+  ```sql
+  select id from t where num = 100*2
+  ```
+
+- 避免在where子句中对字段进行函数操作，这将导致引擎放弃使用索引而进行全表扫描
+
+  ```sql
+  select id from t where substring(name,1,3) = 'abc'
+  select id from t where datediff(day,createdate,'2025-11-30') = 0
+  ```
+
+  应改为：
+
+  ```sql
+  select id from t where name like 'abc%'
+  select id from t where createdate >= '2025-11-30' and createdate < '2025-12-1'
+  ```
+
+- Update语句，如果只更新1、2个字段，不要Update全部字段，否则频繁调用会引起明显的性能消耗，同时带来大量日志
+
+- 对于多张大数据量（几百条以上）的表JOIN操作，先分页再JOIN，否则逻辑读（从内存中读取数据块）会很高，性能很差
+
+- 杜绝select count(*) from table这样不带任何条件的count，会引起全表扫描，而且没有任何业务意义
+
+- 一个表的索引数最好不要超过6个
+
+- 尽量避免更新clustered（聚簇）索引数据列，因为聚簇索引数据列的顺序就是表记录的物理存储顺序，一旦该列值改变将导致整个表记录的顺序的调整，会耗费很多资源
+
+- 尽量使用数字型字段，若只含数值信息的字段，尽量不要设计为字符型，会降低查询和连接的性能，并会增加存储开销。这是因为引擎在处理查询和连接时，会逐个比较字符串每一个字符，而对于数字型只需要比较一次
+
+- 尽可能使用varchar/nvarchar代替char/nchar，首先变长字段存储空间小，可以节省存储空间，其次对于查询，在一个相对较小的字段内搜索效率会更高
+
+- 不要使用select *，用具体字段代替*，不要返回用不到的任何字段
+
+- 尽量使用表变量代替临时表，以减少系统表资源的消耗
+
+- 在新建临时表时，如果一次性插入数据量很大，可以使用select into代替create table，避免造成大量log，以提高速度，如果数据量不大，为了缓和系统表的资源，应先create table，然后insert
+
+  ```sql
+  -- 1. 显式创建临时表结构
+  CREATE TABLE #TempOrders (
+      OrderID INT PRIMARY KEY,
+      CustomerID INT,
+      OrderDate DATETIME,
+      Amount DECIMAL(18,2)
+  )
+  
+  -- 2. 插入数据（高开销）
+  INSERT INTO #TempOrders
+  SELECT 
+      OrderID, CustomerID, OrderDate, Amount 
+  FROM Orders 
+  WHERE OrderDate > '2023-01-01'  -- 大数据量筛选
+  ```
+
+
+
+- 如果使用了临时表，在存储过程的最后务必将所有临时表显式删除，先truncate table，然后drop table，避免系统表的较长时间锁定
+
+- 尽量避免使用游标，效率较差
+
+  ```sql
+  DECLARE employee_cursor CURSOR FOR   -- 1. 声明游标
+  SELECT id, name, salary FROM employees;
+  
+  OPEN employee_cursor;                -- 2. 打开游标
+  
+  FETCH NEXT FROM employee_cursor       -- 3. 获取首行
+  INTO @id, @name, @salary;
+  
+  WHILE @@FETCH_STATUS = 0              -- 4. 循环处理每一行
+  BEGIN
+      -- 逐行处理逻辑（例如计算税费）
+      SET @tax = @salary * 0.2;
+      UPDATE employees SET tax = @tax WHERE CURRENT OF employee_cursor;
+      
+      FETCH NEXT FROM employee_cursor   -- 获取下一行
+      INTO @id, @name, @salary;
+  END
+  
+  CLOSE employee_cursor;               -- 5. 关闭游标
+  DEALLOCATE employee_cursor;           -- 6. 释放资源
+  ```
+
+  基于集合的解决方案
+
+  ```sql
+  -- ✅ 集合操作（0.5秒处理100万行）
+  UPDATE employees 
+  SET tax = salary * 
+      CASE 
+          WHEN salary <= 5000 THEN 0.1
+          WHEN salary <= 20000 THEN 0.2
+          ELSE 0.3
+      END
+  WHERE department = 'Engineering';
+  ```
+
+- 尽量避免大事务操作，提高系统并发能力
+
+
+
+# 从准备更新一条数据到事务的提交的流程
+
+- Buffer Pool是Mysql的一个非常重要的组件，针对数据库的增删改操作都是在Buffer Pool中完成
+- Undo log记录的是数据操作前的样子
+- redo log记录的是数据被操作后的样子（redo log是innodb存储引擎特有）
+- bin log记录的是整个操作记录（主要用于主从复制）
+
+![image-20250622202908961](../img/db/image-20250622202908961.png)
+
+- 首先执行器根据MySQL的执行计划来查询数据，先是从缓存池中查询数据，如果没有就会去数据库中查询，如果查询到了就将其放到缓存池中
+- 在数据被缓存到缓存池的同时，会写入undo log日志文件
+- 更新动作在BufferPool中完成，同时会将更新后的数据添加到redo log buffer
+- 完成后提交事务，在提交的同时会做以下三件事
+  - 将redo log buffer中的数据刷入到redo log文件
+  - 将本次操作记录写入到bin log文件
+  - 将bin log文件名字和更新内容在bin log中的位置记录到redo log中，同时在redo log最后添加commit标记
+- 在提交后的某个时间点，由后台线程异步刷盘，把修改数据刷到磁盘中
+
+# MySQL
+
+## myisam和innodb的区别
+
+myisam引擎是5.1版本之前的默认引擎，支持全文检索、压缩、空间函数等，但是不支持事务和行级锁，所以一般用于有大量查询少量插入的场景来使用，而且myisam不支持外键，并且索引和数据是分开存储的
+
+innodb是基于B+树索引建立的，支持事务、外键，并且通过MVCC来支持高并发，索引和数据存储在一起
+
+
+
+## mysql索引有哪些
+
+- B+树索引
+- 哈希索引
+  - 哈希索引能以O(1)时间进行查找，但失去了有序性
+  - Innodb引擎有”自适应哈希“功能，当某个索引值被使用的非常频繁时，会在B+树索引之上再创建一个哈希索引
+- 全文索引
+  - 全文索引一般用倒排索引实现，它记录着关键词到其所在文档的映射
+  - Innodb在mysql5.6.4版本中开始支持全文索引
+- 空间索引
+  - myisam支持空间索引（R-Tree），可以用于地理数据存储，空间数据索引会从所有维度来索引数据，可以有效使用任意维度进行组合查询
+  - Innodb从mysql5.7开始支持空间索引
+
+## B+树
+
+B+树是基于B树和叶子节点顺序访问指针进行实现的，它具有B树的平衡性，并且通过顺序访问指针提高区间查询的性能。在B+树中，一个节点中的key是从左到右非递减排列，叶子节点通过双向链表连接
+
+![image-20250624005256814](../img/db/image-20250624005256814.png)
+
+### 为什么是B+树
+
+- 为了减少磁盘读取次数，决定了树的高度不能高，所以必须是B树
+- 以页为单位（一般是16kb）读取使得一次IO就能完全载入一个节点，且相邻的节点也能够被预先载入（基于局部性原理，倾向于访问近期访问过的数据及其邻近数据），数据放在叶子节点，本质是一个Page页
+- 为了支持范围查询以及关联关系，页中数据需要有序，且页的尾部节点指向下个页的头部
+
+### 聚簇索引和非聚簇索引
+
+- 聚簇索引（主索引） ：表中数据行的物理存储顺序和索引顺序一致，一个表只有一个聚簇索引
+- 非聚簇索引（辅助索引）：索引的结构与数据行的物理存储顺序无关，一个表可以有多个聚簇索引
+
+![image-20250624221327638](../img/db/image-20250624221327638.png)
+
+主索引的叶子节点保存的是真正的数据，而辅助索引的叶子节点的数据区保存的是主键索引关键字的值
+
+假如要查询name = C的数据，搜索过程：
+
+- 先在辅助索引中通过C查询，找到主键id=9
+- 在主键索引中搜索id为9的数据，最终在主键索引的叶子节点中获取到真正的数据。所以通过辅助索引进行检索，需要检索两次索引
+
+**为什么要这样设计？**
+
+一个原因是：如果和myisam一样在主键索引和辅助索引的叶子节点中都存放**数据行指针**，一旦数据发生迁移（比如更新操作，使得数据行迁移到新数据块中），则需要重新组织维护所有索引（需要更新所有索引的叶子节点的指针）；而Innodb的话，只需要更新主索引的叶子节点的数据，辅助索引保持主键值不变。
+
+```
+MyISAM 索引文件(.MYI)         MyISAM 数据文件(.MYD)
+┌───────────────────┐        ┌────────────────────────────┐
+│ 键值：100          │        │ 数据块1 (偏移0x1000)        │
+│ 指针：0x1000:#0    │───┐    │ 槽0: [ID=100,数据A]        │
+├───────────────────┤   │    │ 槽1: [ID=200,数据B]        │
+│ 键值：200          │   │    └────────────────────────────┘
+│ 指针：0x1000:#1    │───┘    ┌────────────────────────────┐
+└───────────────────┘        │ 数据块2 (偏移0x2000)        │
+                             │ 槽0: [ID=300,数据C]        │
+                             │ 槽1: [ID=400,数据D] ◄──┐    │
+                             └────────────────────────────┘
+                              ▲                        
+                    ┌─────────┘                        
+                    │                                      
+┌───────────────────┐                                      
+│ 键值：400          │                                      
+│ 指针：0x2000:#1    │───────┐                              
+└───────────────────┘       │
+```
+
+### 什么是覆盖索引和回表
+
+覆盖索引指的是在一次查询中，如果一个索引包含或者覆盖所有需要查询的字段的值，就称之为覆盖索引，不需要回表
+
+如何确定一个查询是否是覆盖索引，只需要explain sql语句看extra结果是否是”using index“即可
+
+```sql
+explain select * from user where age=1; // 查询的name无法从索引数据获取
+explain select id,age from user where age=1; //可以直接从索引获取
+```
+
+## 慢查询优化
+
+### 建索引几大原则
+
+1. 最左前缀匹配原则，mysql会一直向右匹配直到遇到范围查询（>、<、between、like）就停止匹配，比如`a = 1 and b = 2 and c > 3 and d = 4`，如果建立（a，b，c，d）顺序的索引，d是用不到索引的，如果建立（a，b，d，c）的索引则都可以用到，abd的顺序可以任意调整
+2. =和in可以乱序，比如`a = 1 and b = 2 and c = 3` 建立(a,b,c)索引可以任意顺序，mysql的查询优化器会帮你优化成索引可以识别的形式
+3. 尽量选择区分度高的列作为索引，区分度公式是count(distince col)/count(*)，表示字段不重复的比例，比例越大，扫描的记录数越少，唯一键的区分度是1
+4. 索引列不能参与计算，比如`from_unixtime(create_time) = ’2014-05-29’`就不能使用到索引，原因很简单，b+树中存的都是数据表中的字段值，但进行检索时，需要把所有元素都应用函数才能比较，显然成本太大。所以语句应该写成create_time = unix_timestamp(’2014-05-29’)
+5. 尽量扩展索引，不要新建索引
+
+### 慢查询优化基本步骤
+
+1. 先运行查询语句，看是否真的很慢，注意设置SQL_NO_CACHE（`select sql_no_cache col1 from table where condition`)
+
+2. 对where条件的每个字段分别查询（比如select col from table where condition1=xxx and condition2 = yyy，分别用select col from table where condition1=xxx，select col from table where condition2=yyy查询，看查询出来的记录数）看用哪个字段查询出来的记录数最小，则该字段的区分度最高，根据此重写查询顺序
+
+3. 使用explain查看执行计划，验证优化预期
+
+4. order by limit形式的sql语句让排序的表优先查
+
+   ```sql
+   -- 问题SQL
+   SELECT * FROM orders
+   WHERE status = 'shipped'
+   ORDER BY create_date DESC
+   LIMIT 10;
+   
+   -- 步骤3：优化方案
+   -- 方案1：为排序字段添加索引
+   CREATE INDEX idx_create_date_status ON orders(create_date DESC, status);
+   
+   -- 方案2：优先处理排序表（大表拆分）
+   SELECT o.* 
+   FROM (
+     SELECT order_id 
+     FROM orders 
+     ORDER BY create_date DESC 
+     LIMIT 10
+   ) AS latest
+   JOIN orders o ON latest.order_id = o.order_id
+   WHERE o.status = 'shipped';
+   ```
+
+5. 了解业务场景
+
+6. 加索引时参照建索引的几大原则
+
+7. 观察结果，不符合预期继续从头分析
+
+### explain解析
+
+![image-20250629211445613](../img/db/image-20250629211445613.png)
+
+- id：select查询的序列号，id值越大优先级越高，越先被执行
+
+- select_type：表示查询的类型
+
+  - SIMPLE：简单的select查询，不包含子查询或者UNION
+
+  - PRIMARY：查询中若包含任何负责的子部分，最外层查询则被标记为PRIMARY
+
+  - SUBQUERY：在select或where中的子查询的select_type（比如`SELECT id, (SELECT name FROM users WHERE id = 1) AS user_name  FROM orders;`）
+
+  - DERIVED：在from中包含的子查询的select_type，mysql会执行这些子查询，把结果放在临时表
+
+  - UNION：若第二个select出现在union之后，则被标记为union
+
+  - UNION RESULT：从UNION表获取结果的SELECT，比如`explain SELECT id FROM table1 UNION SELECT id FROM table2;`，得到的结果
+
+    ```sql
+    +----+--------------+------------+-------+
+    | id | select_type  | table      | type  |
+    +----+--------------+------------+-------+
+    | 1  | PRIMARY      | table1     | ALL   |
+    | 2  | UNION        | table2     | ALL   |
+    | 3  | UNION RESULT | <union1,2> | ALL   |  ← 合并结果
+    +----+--------------+------------+-------+
+    ```
+
+- table：当前执行的表
+
+- type：说明查询使用了哪种类型
+
+  ```shell
+  从最好到最差，依次是：system > const > eq_ref > ref > range > index > all
+  ```
+
+  - system：当表只有一行记录时
+
+  - const：where使用主键索引或唯一索引查询，最多匹配一行记录
+
+  - eq_ref：在使用**JOIN**的时候，对被驱动表使用主键或唯一索引的等值匹配
+
+    ```
+    EXPLAIN SELECT *
+    FROM orders o
+    JOIN users u ON u.id = o.user_id;  -- u.id 是 users 表的主键，对users的查询类型就是eq_ref
+    
+    +----+-------------+-------+--------+---------------+---------+
+    | id | select_type | table | type   | key           | rows    |
+    +----+-------------+-------+--------+---------------+---------+
+    |  1 | SIMPLE      | o     | ALL    | NULL          | 100     | ← 驱动表（全表扫描）
+    |  1 | SIMPLE      | u     | eq_ref | PRIMARY       | 1       | ← 关键！
+    +----+-------------+-------+--------+---------------+---------+
+    ```
+
+  - ref：查询使用了非唯一索引
+
+  - range：查询使用了索引来检索特定范围的行，比如>, <, >=`, `<=, BETWEEN, IN()或LIKE 'prefix%'
+
+  - index：遍历索引树
+
+  - all：全表扫描
+
+- extra：包含不适合在其他列中显示但十分重要的额外信息
+
+  - using filesort：表示查询需要 **额外的排序操作**，且排序无法通过索引直接完成，必须使用文件排序（filesort）算法在内存或磁盘上进行排序。这通常是性能瓶颈的信号，比如：`ORDER BY` 的列未使用索引
+  - using temporary：表示查询需要**创建内部临时表来存储中间结果**，比如**`GROUP BY` 包含非索引字段**、**统计聚合操作（如 `COUNT(DISTINCT)`）**
+  - using join buffer：表明使用了连接缓存
+
+
+## MVCC
+
+### 什么是MVCC
+
+MVCC多版本并发控制，是一种并发控制的方法，通过版本链，实现对数据库的并发访问，通过readview不同的生成策略实现不同的隔离级别（**读已提交**或者**可重复读**）
+
+### MVCC三个基础点
+
+**隐式字段**
+
+![image-20250625225048629](../img/db/image-20250625225048629.png)
+
+- DB_ROW_ID是数据库默认为该行记录生成的唯一隐式主键（会自动建索引）
+- DB_TRX_ID是当前操作该记录的事务ID
+- DB_ROLL_PTR是一个回滚指针，用于配合undo日志，指向上一个旧版本
+
+**undo log**
+
+![image-20250625225419928](../img/db/image-20250625225419928.png)
+
+不同事务或相同事务的对同一记录的修改，会导致该记录的undo log成为一条记录版本线性表，即链表，undo log的链首就是最新的旧记录，链尾就是最早的旧记录
+
+**ReadView**
+
+已提交读和可重复读的区别在于生成的ReadView策略不同
+
+- 已提交读隔离级别下，事务在每次查询都会生成一个独立的ReadView
+- 可重复读隔离级别下，事务仅在第一次查询的时候生成一个ReadView，之后的读都是复用之前的ReadView
+
+具体流程：
+
+ReadView有个列表存储系统中当前活跃的读写事务，也就是开启了还未提交的事务。通过这个列表判断记录的某个版本是否对当前事务可见。
+
+假设当前列表记录的事务id为[80,100]
+
+1. 如果当前事务访问的记录版本的事务id为50，比当前列表最小的id80小，说明这个事务在当前事务开启之前就已提交，所以对当前事务来说是可访问的
+2. 如果要访问的记录版本的事务id为90，发现此事务在列表id最大最小值之间，就再判断是否在列表中，如果在，说明事务仍未提交，该记录版本不能被当前事务访问，如果不在，说明事务已提交，当前事务可以访问该记录版本
+3. 如果要访问的记录版本的事务id为110，比事务列表最大id100还要大，说明这个版本在ReadView生成后才发生，不能被访问
+
+以下是说明实现已提交读和可重复读不同隔离级别的例子
+
+假如此时有一个事务id为100的事务，修改了name，使得name等于小明2，但是事务还未提交，此时的版本链是
+
+![image-20250625232032603](../img/db/image-20250625232032603.png)
+
+此时另一个事务发起了select语句要查询id为1的记录，此时生成的ReadView列表只有[100]。事务去版本链查找记录，找到最近一条，trx_id是100，发现事务id在列表中，不能访问。
+
+于是通过指针继续找下一条记录版本，找到name为小明1的记录，trx_id为60，小于列表的最小id，所以可以访问，得到结果为小明1。
+
+此时把事务id为100的事务提交，并且新建一个事务id为110，也修改id为1的记录，并且不提交事务
+
+![image-20250625233704705](../img/db/image-20250625233704705.png)
+
+此时版本链
+
+![image-20250625233718551](../img/db/image-20250625233718551.png)
+
+这时，select那个事务又执行一次查询，查询id为1的记录
+
+- 如果是已提交读隔离级别，此时会重新生成一个ReadView，活动事务列表变成了[110]，按照规则，会找到小明2的记录
+- 如果是可重复读隔离级别，此时不会重新生成一个ReadView，仍然使用第一次select时生成的ReadView，活动事务列表为[100]，按照规则，找到小明1的记录，两次select的结果是一样的，保证了可重复读。
+
+## MySQL锁的类型
+
+- 共享锁（S锁）和排他锁（X锁）
+  - 读锁是共享锁，多个事务对于同一数据可以共享访问，不能操作修改，使用方法：
+    - 加锁：select *from table where id=1 lock in share mode
+    - 释放锁：commit/rollback
+  - 写锁是排他锁，事务获取了一个数据的X锁，其他事务就不能再获取该行的读锁或写锁，只有获取该排它锁的事务是可以对数据行进行读取和修改
+    - 加锁：delete/update/insert
+    - 加锁：select * from table where ... for update
+    - 释放锁：commit/rollback
+  - 意向锁（表锁），意义：当事务操作需要锁表时，只需要判断意向锁是否存在，存在时则可快速返回该表不能启用表锁
+    - 意向共享锁（IS锁），表示事务准备给数据行加共享锁前，必须先取得该表的意向共享锁
+    - 意向排他锁（IX锁），表示事务准备给数据行加排他锁前，必须先取得该表的意向排他锁
+- 表锁和行锁
+  - 表锁会锁定整张表，并且阻塞其他用户对该表的所有读写操作，比如alter修改表结构的时候会锁表
+  - 行锁可以分为乐观锁和悲观锁
+    - 悲观锁可通过for update实现
+    - 乐观锁通过版本号实现
+
+## 分表
+
+### 垂直分表
+
+将一张表按列切分成多个表，通常是按照列的关系密集程度进行切分
+
+![image-20250626223132119](../img/db/image-20250626223132119.png)
+
+### 水平分表
+
+首先要根据业务场景决定使用什么字段作为分表字段（sharding_key），假如根据用户id分了1024张表，当插入一个用户，id为100，经过hash(100)再对1024取模，就得到要插入的对应的表
+
+![image-20250626223839119](../img/db/image-20250626223839119.png)
+
+### 分表后如何保持id唯一性
+
+- 设置步长：假如有1024个表，初始化值分别为1,2,3，...，1024，步长设置为1024，每次新ID都是上一个id（同一个表）+1024，保证id唯一性
+- 分布式id：自己实现一套分布式id生成算法或使用开源的雪花算法等
+- 分表后不使用主键作为查询依据，而是每张表单独新增一个字段作为唯一主键使用，比如订单表订单号是唯一的，不管最终落到哪张表都基于订单号作为查询依据
+
+### 分表后非sharding_key的查询怎么处理
+
+首先理解问题：比如按订单id分表后，现在需要按用户id查历史订单，但用户id不是分片键
+
+- 建立映射表，保存用户和分片编号（数据量大时，映射表也可以按用户id分表），根据用户id查到分片编号，再去分片根据用户id查历史订单
+
+- 大宽表，核心思想是**通过数据冗余解决查询问题**
+
+  ![image-20250626235712940](../img/db/image-20250626235712940.png)
+
+- 数据量不大时，比如后台一些查询，可以通过多线程扫表，再聚合结果
+
+```java
+List<Callable<List<User>>> taskList = Lists.newArrayList();
+for (int shardingIndex = 0; shardingIndex < 1024; shardingIndex++) {
+    taskList.add(() -> (userMapper.getProcessingAccountList(shardingIndex)));
+}
+List<ThirdAccountInfo> list = null;
+try {
+    list = taskExecutor.executeTask(taskList);
+} catch (Exception e) {
+    //do something
+}
+
+public class TaskExecutor {
+    public <T> List<T> executeTask(Collection<? extends Callable<T>> tasks) throws Exception {
+        List<T> result = Lists.newArrayList();
+        List<Future<T>> futures = ExecutorUtil.invokeAll(tasks);
+        for (Future<T> future : futures) {
+            result.add(future.get());
+        }
+        return result;
+    }
+}
+```
+
+## MySQL主从复制
+
+![image-20250627000104711](../img/db/image-20250627000104711.png)
+
+主要涉及三个线程：binlog线程、IO线程、SQL线程
+
+- binlog线程：负责将主服务器上的数据更改写入二进制日志（binlog）中
+- IO线程：负责从主服务器上读取二进制日志，并写入从服务器的中继日志中
+- SQL线程：负责读取中继日志并重放其中的SQL语句
+
+### 全同步复制
+
+主库写入binlog后强制同步日志到从库中，所有从库都执行完成后才返回给客户端，但这个方式性能会受到严重影响
+
+### 半同步复制
+
+从库写入中继日志成功后返回ack确认给主库，主库收到至少一个从库确认就认为操作完成
+
+
+
+### MySQL主从的延迟怎么解决
+
+必要时强制走主库查询
+
+### MySQL读写分离方案
+
+主写从读
+
+读写分离能提高性能的原因是：
+
+- 主从服务器负责各自的读和写，极大缓解锁竞争，比如主库负责写请求，加写锁不影响外部读（从库）操作
+- 从服务器可以使用myisam，提升查询性能和节约系统开销
+  - 无undo日志写入，节省磁盘io
+  - 无MVCC多版本控制，节省内存
+  - 无行锁管理开销，减少cpu上下文切换
+- 增加冗余，提高可用性
