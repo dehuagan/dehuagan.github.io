@@ -9,6 +9,7 @@
   * [javaIO](Java/javaIO.md)
   * [spring](Java/spring.md)
   * [设计模式](Java/设计模式.md)
+  * [中间件](Java/中间件.md)
 * 数据库
   * [MySQL](数据库/MySQL.md)
   * [Redis](数据库/Redis.md)
