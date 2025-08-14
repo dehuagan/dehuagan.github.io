@@ -34,6 +34,19 @@ akka主要创建多个actor，每个actor只监听一个事件（项目中，一
 
 为什么使用akka-actor，因为actor框架支持高并发，每个actor都是消息驱动，只处理属于他的消息，同时框架使用dispatcher处理actor的消息（底层使用了forkjoinpool），当一个请求过来时，akka-http先把请求发送给对应的actor，请求会进入该actor的消息队列，然后由dispatcher从actor的消息队列中获取消息，然后提交到forkjoinpool中，由forkjoinpool中的线程执行该actor的指令逻辑(调用receive方法)
 
+**akka-http的优势是少量线程处理大量并发请求**
+
+每个请求的处理逻辑最终被封装成 **Actor 消息**。
+
+Akka 的 **Dispatcher**（线程池）取消息执行：
+
+- 如果消息需要发起异步 I/O（数据库、下游接口），Akka HTTP 会注册一个 **回调事件**。
+- Dispatcher 线程立即释放，去执行消息队列里的其他消息。
+
+I/O 完成后，回调事件再次生成消息，放回队列，等待空闲线程继续执行。
+
+### 说一下这个项目里面，解决过的几个方面的难点
+
 #### 难点1
 
 开发oslo-policy权限控制组件
@@ -50,13 +63,13 @@ akka主要创建多个actor，每个actor只监听一个事件（项目中，一
 
 难点
 
-- 策略规则的解析：涉及复合逻辑表达式，如`"create_network:admin or project_id:%(project_id)s"`， 以及需要运行时动态注入上下文参数
+- 代码量大，解析逻辑复杂	策略规则的解析：涉及复合逻辑表达式，如`"create_network:admin or project_id:%(project_id)s"`， 以及需要运行时动态注入上下文参数
 - ~~如何集成到现有框架：复用已有的actor+前置处理，或者使用AOP，不考虑spring拦截器（因为只作用于@Controller，而处理业务逻辑的是actor，由@Component修饰），最终选择复用已有方案，因为复杂的业务场景，将前置处理和业务逻辑都聚合在actor中，而AOP考虑到依赖动态代理，性能消耗大，并且不好访问actor的消息上下文~~
 
 解决办法
 
 - 梳理原生的oslo policy的代码流程
-- 服务启动时，预先将每个操作对应的规则都转换成AST语法树，使用ConcurrentHashMap将规则缓存起来
+- 基于当前架构做适配、剪枝，而不是盲目照抄：服务启动时，预先将每个操作对应的规则都转换成AST语法树，使用ConcurrentHashMap将规则缓存起来；把权限校验模块，加入到作为请求实际处理逻辑前的前置责任链中
 
 ```java
 rule:admin_or_owner or (is_admin:True and not expired:True)
@@ -80,8 +93,8 @@ LogicalRule(OR,
 
 解决办法：
 
-- 首先想到是数据库，某个sql查询耗时长，开启druid的sql时长日志打印，发现果然有一处根据dhcp信息查询port的sql耗时很久（2~3s）
-- 另外想到一个因素，GC频率高，加长了耗时，于是查看GC日志，发现full gc频繁（几秒左右一次，1次1s左右），再调接口的时候，使用MAT去分析内存情况，发现port对象内存占用特别高（几乎30M+）
+- 首先想到是数据库，某个sql查询耗时长，通过日志中druid的慢查询sql，发现果然有一处根据dhcp信息查询port的sql耗时很久（2~3s）
+- 另外想到一个因素，GC频率高，加长了耗时，于是查看GC日志，发现full gc频繁（10s左右一次，1次1s左右），再调接口的时候，使用MAT去分析内存情况，发现port对象内存占用特别高（几乎30M+）
 - 结果很明显，就是因为没有加上一些过滤条件，查询了过多的不相关的port（每次上万），导致sql执行缓慢，内存飙高，gc频繁
 - 着手优化，代码中增加过滤条件（带上dhcp某些属性），使得查询出来的port对象大量减少，从而降低内存占用，<u>jmeter压测的时延具体忘了，但是记得看接口时延日志是不到1s；同时，原本设置的堆大小是2G，通过减少port对象查询，观察服务稳态下，即full gc后的老年代占用，发现维持在800M左右，于是重新设置堆大小为1.5G（新生代400M+老年代800M+300M的buffer），实现堆内存优化
 
@@ -96,8 +109,8 @@ LogicalRule(OR,
 
 原有方案（主要说第一个）：
 
-1. quark处理业务逻辑和资源入库（commit）后，发送消息给laccon-controller，通知让它查数据库，根据新增资源信息创建k8s的CR，这个方案的问题是：quark写入DB后还没发消息给controller就崩溃了，controller永远不知道要处理此资源，导致系统状态不一致
-2. quark处理业务逻辑和资源入库（commit）后，直接调k8s的接口创建CR，这个方案的问题是：需要保证数据库操作和CR创建的原子性，否则，数据库操作成功，但是CR创建失败，导致系统状态不一致；同时，会造成controller和quark组件间的功能耦合
+1. quark处理业务逻辑和资源入库（commit）后，通过消息队列发送消息给laccon-controller，通知让它调quark接口，根据新增资源信息创建k8s的CR，这个方案的问题是：quark写入DB后还没发消息给controller，quark就崩溃了，controller永远不知道要处理此资源，导致系统状态不一致
+2. ~~quark处理业务逻辑和资源入库（commit）后，直接调k8s的接口创建CR，这个方案的问题是：需要保证数据库操作和CR创建的原子性，否则，数据库操作成功，但是CR创建失败，导致系统状态不一致；同时，会造成controller和quark组件间的功能耦合~~
 
 代替方案：
 
@@ -125,7 +138,6 @@ api并发上限：200->3000，提升15倍
 还有哪些可优化：
 
 GC调优，换垃圾回收器
-限流、容灾、降级
 
 ## 有可能问到的问题
 
