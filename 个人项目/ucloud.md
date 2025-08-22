@@ -75,12 +75,12 @@ I/O 完成后，回调事件再次生成消息，放回队列，等待空闲线�
 rule:admin_or_owner or (is_admin:True and not expired:True)
 // 对应的AST如下
 LogicalRule(OR,
-  ReferenceRule("admin_or_owner"),
-  LogicalRule(AND,
-    AtomicRule("is_admin", "True"),
-    LogicalRule(NOT, AtomicRule("expired", "True"))
-  )
-)
+            ReferenceRule("admin_or_owner"),
+LogicalRule(AND,
+            AtomicRule("is_admin", "True"),
+LogicalRule(NOT, AtomicRule("expired", "True"))
+        )
+        )
 ```
 
 #### 难点2
@@ -149,3 +149,9 @@ GC调优，换垃圾回收器
 
 1. akka-actor基于消息传递，每个actor拥有自己的状态和消息队列，内部串行处理消息，天然支持并发
 2. akka-actor和SpringBoot兼容性好，我们将每个actor作为一个bean来管理，方便控制其生命周期
+
+### 如何支持单节点3k并发
+
+1、akka-actor+SpringBoot天然支持并发和异步非阻塞操作，每个actor都是消息驱动并相互隔离，actor使用dispatcher，将actor处理消息的逻辑包装成任务提交给forkjoinpool执行，其优势是每个线程都有一个双端队列，当一个线程执行完后可以窃取别的线程的任务继续执行，能保证线程尽量忙碌，提高cpu使用率，减少上下文切换，达到使用少量线程处理大量请求的效果（相比SpringBoot一个请求使用一个线程处理），同时actor最终会返回一个future让Pipeline.pipe处理，即在pipe方法内部注册future的回调，将结果发给sender
+
+2、由于业务属于读多写少，数据库采用读写分离，主写从读，分别使用两个数据库连接池管理主从库的连接，并且对于每类actor，预置16个实例，其中5个负责写操作，11个负责读操作，从而避免写请求拥堵影响读请求，当一个请求过来时，会根据上下文信息获取当前时读请求还是写请求，从而路由到对应的actor，然后根据请求类型调对应的sqlsessionfactory创建sqlsession，sqlsession会根据类型获取读或写的数据源的连接，请求数据库，同时请求数据库的操作也是异步的，分别有读线程池和写线程池负责
