@@ -60,6 +60,7 @@ I/O 完成后，回调事件再次生成消息，放回队列，等待空闲线�
 
 - 资源隔离：用户只能操作自己项目的网络资源
 - 动态策略管理：无需重启服务就能调整权限规则
+- **将配置文件放在etcd，etcd作为配置中心，多节点部署quark的情况下，quark启动时统一加载etcd中的policy.json文件，做到只需一个文件，应用多个节点，同时如果policy.json有修改，quark会通过jetcd监控其修改，从而实现热更新**
 
 难点
 
@@ -75,12 +76,12 @@ I/O 完成后，回调事件再次生成消息，放回队列，等待空闲线�
 rule:admin_or_owner or (is_admin:True and not expired:True)
 // 对应的AST如下
 LogicalRule(OR,
-            ReferenceRule("admin_or_owner"),
-LogicalRule(AND,
-            AtomicRule("is_admin", "True"),
-LogicalRule(NOT, AtomicRule("expired", "True"))
-        )
-        )
+  ReferenceRule("admin_or_owner"),
+  LogicalRule(AND,
+    AtomicRule("is_admin", "True"),
+    LogicalRule(NOT, AtomicRule("expired", "True"))
+  )
+)
 ```
 
 #### 难点2
@@ -124,6 +125,13 @@ quark在处理业务前，使用kafka向controller发送write-ahead消息，再�
 解决办法：
 
 quark在处理业务前，调k8s接口创建action资源，actyionType为write-ahead，在处理完业务后，创建一个actionType为done的action资源，controller负责list&watch这个action资源，同时启动一个协程维护一个最小堆，堆顶元素就是那个最先过期的action，观察整体的超时情况，当controller监听到write_ahead的action时，将action放入一个最小堆，监听到对应的done的action时，就从最小堆中删去这个action，如果在超时时间内没有监听到done，就直接去根据write_ahead的action中携带的资源信息查quark服务，然后创建自定义资源，比如port，这样就避免了每组action都要创建一个定时器监控超时时间，相当于要创建很多协程，造成性能损耗
+
+- write-ahead action和done action 通过requestId构成一对
+- 多节点部署controller的情况下，不会出现重复消费问题，因为针对action这个cr，同一时间只有一个controller服务能够更新该cr状态为processing（每个对象有一个 **resourceVersion** 字段。更新时，客户端需要携带最新的 resourceVersion。如果在你提交更新之前，这个对象已经被别人修改过 → 你的更新会因为 resourceVersion 不匹配而 **失败），所以我们的逻辑是：当controller收到quark创建的write-ahead action时，先尝试更新其状态为processing，更新成功则把它放入堆中，否则直接返回不处理；当收到done action时，先判断其对应的write-ahead action是否在本节点中，可以通过action携带的requestId查询apiserver，如果查到的write-ahead action的owner字段属于本节点则处理，否则不处理**
+
+
+
+
 
 ### Result（结果）
 
