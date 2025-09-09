@@ -62,24 +62,9 @@ I/O 完成后，回调事件再次生成消息，放回队列，等待空闲线�
 
 - 动态策略管理：无需重启服务就能调整权限规则
 
-- **将配置文件放在etcd（把 `policy.json` 直接存到 ConfigMap），etcd作为配置中心，多节点部署quark的情况下，quark启动时统一加载etcd中的policy.json文件，做到只需一个文件，应用多个节点，同时如果policy.json有修改，quark会通过jetcd监控其修改，从而实现热更新**
+- **将配置文件放在etcd（跟k8s的etcd分开，即在k8s上再部署一个etcd），etcd作为配置中心，多节点部署quark的情况下，quark启动时统一加载etcd中的policy.json文件，做到只需一个文件，应用多个节点，同时如果policy.json有修改，quark会通过jetcd监控其修改，从而实现热更新**
 
-  ```
-  apiVersion: v1
-  kind: ConfigMap
-  metadata:
-    name: policy-config
-    namespace: default
-  data:
-    policy.json: |
-      {
-        "rules": [
-          {"action": "deny", "resource": "all"}
-        ]
-      }
-  
-  kubectl apply -f policy-config.yaml
-  ```
+
 
 
 
